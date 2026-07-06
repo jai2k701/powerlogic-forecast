@@ -87,8 +87,9 @@ tr:hover td{background:var(--light-blue)}
     <div class="sub">DAM / RTM / G-DAM Price Forecast &amp; Intraday Block Analysis</div>
   </div>
   <div style="display:flex;gap:10px;align-items:center">
+    <span class="tag tag-gray" id="data-tag">LOADING…</span>
     <span class="tag tag-green">FY 2026-27</span>
-    <span class="tag tag-blue">v1.0</span>
+    <span class="tag tag-blue">v2.0</span>
   </div>
 </div>
 
@@ -242,7 +243,7 @@ tr:hover td{background:var(--light-blue)}
       </div>
     </div>
 
-    <div class="footnote">** Indicative forecast from embedded historical price patterns (IEX-calibrated levels, FY24-FY27). Block prices = forecast daily avg × seasonal intraday shape, clamped to CERC floor/ceiling. Not a substitute for exchange-published MCP. All prices in Rs/kWh.</div>
+    <div class="footnote" id="footnote">** Indicative forecast from embedded historical price patterns (IEX-calibrated levels, FY24-FY27). Block prices = forecast daily avg × seasonal intraday shape, clamped to CERC floor/ceiling. Not a substitute for exchange-published MCP. All prices in Rs/kWh.</div>
   </div>
 </div>
 
@@ -291,8 +292,23 @@ function genHistory(mktKey){
   return out;
 }
 
-// Intraday 96-block shape (multipliers, mean = 1). Depends on market, month & scenario levers.
+// Intraday 96-block shape (multipliers, mean = 1).
+// Live mode: starts from the real average profile of the last 45 days (SHAPES),
+// then applies scenario levers. Fallback: synthetic seasonal shape.
 function blockShape(mktKey, month, solarPct, peakPct){
+  if (SHAPES[mktKey]){
+    const shape = SHAPES[mktKey].map((v,b)=>{
+      const h = b/4;
+      if (h >= 10 && h < 17) v *= 1 - (solarPct-100)/100*0.30;   // more RE → deeper solar dip
+      if (h >= 18.5 && h < 23) v *= 1 + (peakPct-100)/100*0.50;  // peak stress lever
+      return v;
+    });
+    const mean = shape.reduce((a,c)=>a+c,0)/96;
+    return shape.map(v => v/mean);
+  }
+  return synthShape(mktKey, month, solarPct, peakPct);
+}
+function synthShape(mktKey, month, solarPct, peakPct){
   const summer = (month >= 3 && month <= 8);        // Apr-Sep: deeper solar dip
   const solarDepth = (mktKey === 'RTM' ? 0.34 : mktKey === 'GDAM' ? 0.22 : 0.28)
                      * (solarPct/100) * (summer ? 1.1 : 0.85);
@@ -383,7 +399,38 @@ const MODELS = {
 };
 
 // ==================== STATE & PIPELINE ====================
+// Boot with synthetic data so the UI renders instantly, then swap in real
+// IEX prices from the backend (backend/server.py) when it is reachable.
 const HISTORY = { DAM:genHistory('DAM'), RTM:genHistory('RTM'), GDAM:genHistory('GDAM') };
+const SHAPES = {};          // market -> [96 multipliers] from real data
+let dataMode = 'SYNTHETIC';
+
+async function initData(){
+  const tag = document.getElementById('data-tag');
+  try{
+    for (const mkt of ['DAM','RTM','GDAM']){
+      const [daily, shape] = await Promise.all([
+        fetch(`/api/daily?market=${mkt}&days=400`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+        fetch(`/api/shape?market=${mkt}&days=45`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+      ]);
+      if (daily.length < 60) throw new Error(`only ${daily.length} days for ${mkt}`);
+      HISTORY[mkt] = daily.map(d => ({ date:new Date(d.date+'T00:00:00'), price:d.price }));
+      SHAPES[mkt] = shape;
+    }
+    dataMode = 'LIVE';
+    tag.textContent = 'LIVE DB · IEX';
+    tag.className = 'tag tag-green';
+    const last = HISTORY.DAM[HISTORY.DAM.length-1].date;
+    document.getElementById('footnote').textContent =
+      `** Forecast computed on real IEX block-wise prices scraped into data/iex_prices.db (history up to ${fmtShort(last)}; intraday shape = last 45 days actual profile). Block prices = forecast daily avg × intraday shape, clamped to CERC floor/ceiling. All prices in Rs/kWh.`;
+    recalc();
+  } catch(e){
+    console.warn('Live DB not reachable, using synthetic data:', e.message);
+    tag.textContent = 'SYNTHETIC DATA';
+    tag.className = 'tag tag-amber';
+  }
+}
+
 let curMarket = 'DAM';
 let trendChart = null, blockChart = null;
 let lastResult = null;   // { days:[{date, avg, lo, hi, blocks:[96], bLo, bHi}], ... }
@@ -593,7 +640,8 @@ document.querySelectorAll('.market-tab').forEach(t => t.addEventListener('click'
   recalc();
 }));
 
-recalc();
+recalc();      // instant render (synthetic)
+initData();    // swap in real DB data when backend responds
 </script>
 </body>
 </html>

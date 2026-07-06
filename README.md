@@ -14,7 +14,16 @@ Companion app to [powerlogic](https://github.com/jai2k701/powerlogic) (Industria
 
 ## Run
 
-Open `index.html` in any browser — no build step, no backend. Chart.js is loaded from CDN.
+```
+python backend/server.py        # http://localhost:8123 — app + real IEX data from SQLite
+```
+
+The frontend boots instantly on synthetic data, then swaps in real prices from the backend
+(`LIVE DB · IEX` tag in the header). Opened as a plain file or on GitHub Pages (no backend),
+it falls back to synthetic data (`SYNTHETIC DATA` tag).
+
+API: `/api/meta`, `/api/daily?market=DAM&days=400`, `/api/shape?market=DAM&days=45`,
+`/api/blocks?market=DAM&date=2026-06-01`. Markets: `DAM` `RTM` `GDAM`. Prices in Rs/kWh.
 
 ## Data scraper (`scraper/iex_scraper.py`)
 
