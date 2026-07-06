@@ -1,0 +1,2 @@
+@echo off
+"C:\Python314\python.exe" "C:\Users\Jai_PC\Desktop\PriceForecastApp\scraper\iex_scraper.py" --update

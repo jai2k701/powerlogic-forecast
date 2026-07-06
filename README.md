@@ -16,4 +16,23 @@ Companion app to [powerlogic](https://github.com/jai2k701/powerlogic) (Industria
 
 Open `index.html` in any browser — no build step, no backend. Chart.js is loaded from CDN.
 
+## Data scraper (`scraper/iex_scraper.py`)
+
+Extracts real block-wise (15-min, 96 blocks/day) MCP + volume data for DAM, RTM and G-DAM
+from the IEX market-snapshot pages into SQLite at `data/iex_prices.db`
+(table `market_prices`, PK: date + market + exchange + block).
+
+```
+python scraper/iex_scraper.py --backfill 365                                # previous one year, all markets
+python scraper/iex_scraper.py --update                                      # last 7 days + next day (daily job)
+python scraper/iex_scraper.py --market DAM --from-date 01-05-2026 --to-date 31-05-2026
+```
+
+A Windows Scheduled Task ("IEX Price Scraper", daily 15:30, after DAM results publish)
+runs `scraper/run_update.cmd` to keep the database current. Recreate it with:
+
+```
+schtasks /Create /TN "IEX Price Scraper" /TR "<path>\scraper\run_update.cmd" /SC DAILY /ST 15:30 /F
+```
+
 > Prices are indicative, generated from embedded historical seasonal patterns (summer/October highs, monsoon lows, weekend dips). Not a substitute for exchange-published MCP.
