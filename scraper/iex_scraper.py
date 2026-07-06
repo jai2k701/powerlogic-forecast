@@ -113,13 +113,23 @@ def parse_records(html):
                 d = datetime.strptime(rec["date"], "%d-%m-%Y").date()
             except (KeyError, ValueError):
                 continue
+            # G-DAM uses unconstrained_m_c_p / total_cleared_volume / total_sell_bid
+            mcp = rec.get("mcp")
+            if mcp is None:
+                mcp = rec.get("unconstrained_m_c_p")
+            mcv = rec.get("mcv")
+            if mcv is None:
+                mcv = rec.get("total_cleared_volume")
+            sell = rec.get("sell_bid")
+            if sell is None:
+                sell = rec.get("total_sell_bid")
             yield {
                 "price_date": d.isoformat(),
                 "time_block": hh * 4 + mm // 15 + 1,
-                "mcp": num(rec.get("mcp")),
-                "mcv": num(rec.get("mcv")),
+                "mcp": num(mcp),
+                "mcv": num(mcv),
                 "purchase_bid": num(rec.get("purchase_bid")),
-                "sell_bid": num(rec.get("sell_bid")),
+                "sell_bid": num(sell),
                 "fsv": num(rec.get("final_scheduled_volume")),
             }
 
