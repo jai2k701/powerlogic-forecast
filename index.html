@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PowerLogic — Market Price Forecasting</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#f0f4f8;--surface:#fff;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#1e3a5f;--accent2:#2563eb;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--light-blue:#eff6ff;--input-bg:#f8fafc}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.header{background:linear-gradient(135deg,#1e3a5f 0%,#0f2744 100%);padding:18px 32px;display:flex;align-items:center;justify-content:space-between;color:#fff}
+.header h1{font-size:22px;font-weight:700;letter-spacing:-0.3px}
+.header h1 span{color:#60a5fa}
+.header .sub{font-size:12px;color:#94a3b8;margin-top:2px}
+.main-layout{display:grid;grid-template-columns:380px 1fr;gap:0;min-height:calc(100vh - 62px)}
+.left-panel{background:var(--surface);border-right:1px solid var(--border);padding:24px 20px;overflow-y:auto;max-height:calc(100vh - 62px)}
+.right-panel{padding:24px 28px;overflow-y:auto;max-height:calc(100vh - 62px)}
+.section-title{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+select,input[type="number"],input[type="date"]{width:100%;background:var(--input-bg);border:1.5px solid var(--border);color:var(--text);padding:9px 10px;border-radius:7px;font-size:13px;outline:none;transition:border-color 0.2s}
+select:focus,input:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(37,99,235,0.1)}
+select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+.btn-row{display:flex;gap:10px;justify-content:center;margin-top:16px}
+.btn{padding:9px 24px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#0f2744}
+.btn-clear{background:var(--input-bg);color:var(--muted);border:1.5px solid var(--border)}
+.market-tabs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.market-tab{padding:10px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--input-bg);cursor:pointer;text-align:center;transition:all 0.15s}
+.market-tab .nm{font-size:13px;font-weight:700}
+.market-tab .ds{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.3px;margin-top:2px}
+.market-tab.active{border-color:var(--accent2);background:var(--light-blue)}
+.market-tab.active .nm{color:var(--accent2)}
+.slider-group{margin-bottom:14px}
+.slider-group .slider-head{display:flex;justify-content:space-between;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px}
+.slider-group .slider-head .v{color:var(--accent2);font-weight:700}
+input[type="range"]{width:100%;accent-color:var(--accent2)}
+.admin-section{margin-top:14px;padding-top:12px;border-top:2px dashed var(--border)}
+.admin-title{font-size:11px;font-weight:700;color:var(--orange);margin-bottom:10px;text-transform:uppercase}
+.result-title{font-size:15px;font-weight:700;color:var(--accent2);margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid var(--accent2)}
+.summary-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.summary-box{border-radius:10px;padding:14px;border:1px solid var(--border);background:var(--surface)}
+.summary-box .label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;color:var(--muted)}
+.summary-box .value{font-size:21px;font-weight:800;color:var(--accent)}
+.summary-box .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.sb-avg{background:#f0fdf4;border-color:#bbf7d0}.sb-avg .label{color:#166534}.sb-avg .value{color:#15803d}
+.sb-peak{background:#fef2f2;border-color:#fecaca}.sb-peak .label{color:#991b1b}.sb-peak .value{color:#dc2626}
+.sb-min{background:#eff6ff;border-color:#bfdbfe}.sb-min .label{color:#1e40af}.sb-min .value{color:#2563eb}
+.sb-chg .value.up{color:var(--red)}.sb-chg .value.down{color:var(--green)}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px}
+.chart-card .card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.chart-card .card-title{font-size:13px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.4px}
+.chart-wrap{position:relative;height:280px}
+.chart-wrap.sm{height:240px}
+.compare-chips{display:flex;gap:10px;margin-bottom:18px}
+.chip{flex:1;border-radius:10px;padding:10px 14px;border:1px solid var(--border);background:var(--surface);display:flex;justify-content:space-between;align-items:center}
+.chip .k{font-size:12px;font-weight:700}
+.chip .p{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.chip.c-dam{border-color:#bfdbfe;background:#eff6ff}.chip.c-dam .k{color:#1e40af}.chip.c-dam .p{color:#2563eb}
+.chip.c-rtm{border-color:#fde68a;background:#fefce8}.chip.c-rtm .k{color:#92400e}.chip.c-rtm .p{color:#b45309}
+.chip.c-gdam{border-color:#bbf7d0;background:#f0fdf4}.chip.c-gdam .k{color:#166534}.chip.c-gdam .p{color:#15803d}
+.table-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.table-scroll{max-height:320px;overflow-y:auto;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{position:sticky;top:0;background:var(--accent);color:#fff;padding:7px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.3px}
+td{padding:6px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+tr:hover td{background:var(--light-blue)}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.tag-green{background:#dcfce7;color:#166534}
+.tag-blue{background:#dbeafe;color:#1e40af}
+.tag-red{background:#fee2e2;color:#991b1b}
+.tag-amber{background:#fef3c7;color:#92400e}
+.tag-gray{background:#f1f5f9;color:#475569}
+.footnote{font-size:11px;color:var(--muted);margin-top:12px}
+.btn-sm{padding:6px 14px;font-size:12px;border-radius:6px}
+@media (max-width:1000px){.main-layout{grid-template-columns:1fr}.summary-boxes{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ <span>PowerLogic</span> — Market Price Forecasting</h1>
+    <div class="sub">DAM / RTM / G-DAM Price Forecast &amp; Intraday Block Analysis</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <span class="tag tag-green">FY 2026-27</span>
+    <span class="tag tag-blue">v1.0</span>
+  </div>
+</div>
+
+<div class="main-layout">
+  <div class="left-panel">
+    <div class="section-title">Market Segment</div>
+    <div class="market-tabs" id="market-tabs">
+      <div class="market-tab active" data-mkt="DAM"><div class="nm">DAM</div><div class="ds">Day-Ahead</div></div>
+      <div class="market-tab" data-mkt="RTM"><div class="nm">RTM</div><div class="ds">Real-Time</div></div>
+      <div class="market-tab" data-mkt="GDAM"><div class="nm">G-DAM</div><div class="ds">Green DAM</div></div>
+    </div>
+
+    <div class="section-title">Forecast Parameters</div>
+    <div class="form-row">
+      <div class="form-group"><label>Exchange</label>
+        <select id="f-exchange" onchange="recalc()">
+          <option value="IEX" selected>IEX</option>
+          <option value="PXIL">PXIL</option>
+          <option value="HPX">HPX</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Forecast Horizon</label>
+        <select id="f-horizon" onchange="recalc()">
+          <option value="1">Next Day</option>
+          <option value="7" selected>Next 7 Days</option>
+          <option value="15">Next 15 Days</option>
+          <option value="30">Next 30 Days</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Forecast Model</label>
+      <select id="f-model" onchange="recalc()">
+        <option value="hw" selected>Holt-Winters (Trend + Weekly Seasonality)</option>
+        <option value="snaive">Seasonal Naive (Same Day Last Week)</option>
+        <option value="ma7">7-Day Moving Average</option>
+        <option value="lr">Linear Trend + Weekly Regression</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>History Window</label>
+        <select id="f-window" onchange="recalc()">
+          <option value="90" selected>90 Days</option>
+          <option value="180">180 Days</option>
+          <option value="365">365 Days</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Confidence Band</label>
+        <select id="f-ci" onchange="recalc()">
+          <option value="1.28" selected>80%</option>
+          <option value="1.64">90%</option>
+          <option value="1.96">95%</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="admin-section">
+      <div class="admin-title">⚙ Scenario Adjustments</div>
+      <div class="slider-group">
+        <div class="slider-head"><span>Demand Growth</span><span class="v" id="v-demand">0%</span></div>
+        <input type="range" id="a-demand" min="-10" max="15" value="0" step="0.5" oninput="recalc()">
+      </div>
+      <div class="slider-group">
+        <div class="slider-head"><span>Solar / RE Availability</span><span class="v" id="v-solar">100%</span></div>
+        <input type="range" id="a-solar" min="60" max="140" value="100" step="5" oninput="recalc()">
+      </div>
+      <div class="slider-group">
+        <div class="slider-head"><span>Fuel / Import Price Factor</span><span class="v" id="v-fuel">100%</span></div>
+        <input type="range" id="a-fuel" min="80" max="130" value="100" step="5" oninput="recalc()">
+      </div>
+      <div class="slider-group">
+        <div class="slider-head"><span>Evening Peak Stress</span><span class="v" id="v-peak">100%</span></div>
+        <input type="range" id="a-peak" min="80" max="150" value="100" step="5" oninput="recalc()">
+      </div>
+    </div>
+
+    <div class="admin-section">
+      <div class="admin-title">📊 Price Caps (CERC)</div>
+      <div class="form-row">
+        <div class="form-group"><label>Ceiling (Rs/kWh)</label>
+          <input type="number" id="a-cap" value="10" step="0.5" oninput="recalc()">
+        </div>
+        <div class="form-group"><label>Floor (Rs/kWh)</label>
+          <input type="number" id="a-floor" value="0" step="0.5" oninput="recalc()">
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-clear" onclick="resetAll()">Reset</button>
+      <button class="btn btn-primary" onclick="recalc()">Forecast</button>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="summary-boxes">
+      <div class="summary-box sb-avg">
+        <div class="label">Forecast Avg (Rs/kWh)</div>
+        <div class="value" id="r-avg">0.00</div>
+        <div class="sub" id="r-avg-sub">—</div>
+      </div>
+      <div class="summary-box sb-peak">
+        <div class="label">Peak Block Price</div>
+        <div class="value" id="r-peak">0.00</div>
+        <div class="sub" id="r-peak-sub">—</div>
+      </div>
+      <div class="summary-box sb-min">
+        <div class="label">Min Block Price</div>
+        <div class="value" id="r-min">0.00</div>
+        <div class="sub" id="r-min-sub">—</div>
+      </div>
+      <div class="summary-box sb-chg">
+        <div class="label">vs Trailing 30-Day Avg</div>
+        <div class="value" id="r-chg">0.0%</div>
+        <div class="sub" id="r-chg-sub">—</div>
+      </div>
+    </div>
+
+    <div class="compare-chips" id="compare-chips">
+      <div class="chip c-dam"><span class="k">DAM Avg</span><span class="p" id="cmp-dam">—</span></div>
+      <div class="chip c-rtm"><span class="k">RTM Avg</span><span class="p" id="cmp-rtm">—</span></div>
+      <div class="chip c-gdam"><span class="k">G-DAM Avg</span><span class="p" id="cmp-gdam">—</span></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="card-head">
+        <div class="card-title" id="trend-title">Daily Avg MCP — History &amp; Forecast</div>
+        <span class="tag tag-amber" id="model-tag">Holt-Winters</span>
+      </div>
+      <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="card-head">
+        <div class="card-title">Intraday Profile — 96 Time Blocks (15-min)</div>
+        <select id="f-day" class="btn-sm" style="width:auto;padding:6px 28px 6px 10px" onchange="renderIntraday()"></select>
+      </div>
+      <div class="chart-wrap sm"><canvas id="chartBlocks"></canvas></div>
+    </div>
+
+    <div class="table-card">
+      <div class="card-head">
+        <div class="card-title" style="font-size:13px;font-weight:700;color:var(--accent);text-transform:uppercase">Block-wise Forecast <span id="tbl-day" style="color:var(--accent2)"></span></div>
+        <button class="btn btn-primary btn-sm" onclick="downloadCSV()">⬇ Download CSV</button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Block</th><th>Time</th><th>Price (Rs/kWh)</th><th>Low</th><th>High</th><th>Slot</th></tr></thead>
+          <tbody id="tbl-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footnote">** Indicative forecast from embedded historical price patterns (IEX-calibrated levels, FY24-FY27). Block prices = forecast daily avg × seasonal intraday shape, clamped to CERC floor/ceiling. Not a substitute for exchange-published MCP. All prices in Rs/kWh.</div>
+  </div>
+</div>
+
+<script>
+// ==================== MARKET DATABASE ====================
+// Calibration: IEX-like levels. base = long-run avg MCP (Rs/kWh),
+// monthly = seasonal factors Jan..Dec (summer + Oct high, monsoon low),
+// weekend = weekend demand dip, vol = relative day-to-day volatility.
+const MARKETS = {
+  DAM:  { name:"Day-Ahead Market",   base:4.45, vol:0.16, weekend:0.94,
+          monthly:[1.02,1.04,1.06,1.10,1.15,1.12,0.88,0.84,0.90,1.06,1.00,0.99] },
+  RTM:  { name:"Real-Time Market",   base:4.05, vol:0.22, weekend:0.93,
+          monthly:[1.01,1.03,1.05,1.11,1.16,1.13,0.86,0.82,0.89,1.07,1.00,0.98] },
+  GDAM: { name:"Green Day-Ahead",    base:4.72, vol:0.14, weekend:0.95,
+          monthly:[1.04,1.05,1.05,1.08,1.12,1.09,0.92,0.89,0.93,1.05,1.01,1.01] }
+};
+// Exchange liquidity premium/discount vs IEX reference
+const EXCHANGES = { IEX:1.0, PXIL:1.015, HPX:1.008 };
+
+const HIST_DAYS = 400;   // generated history length
+const SHOW_HIST = 45;    // history days drawn on the trend chart
+
+// Deterministic pseudo-random (seeded) so history is stable across reloads
+function rand(seed){ const x = Math.sin(seed*127.1 + 311.7)*43758.5453; return x - Math.floor(x); }
+
+function addDays(d, n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function fmtDate(d){ return d.toISOString().slice(0,10); }
+function fmtShort(d){ return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}); }
+
+// Generate daily average MCP history for a market (ends yesterday)
+function genHistory(mktKey){
+  const m = MARKETS[mktKey];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const out = [];
+  for (let i = HIST_DAYS; i >= 1; i--){
+    const d = addDays(today, -i);
+    const mon = d.getMonth(), dow = d.getDay();
+    let p = m.base * m.monthly[mon];
+    if (dow === 0 || dow === 6) p *= m.weekend;
+    p *= 1 + 0.015*Math.sin(2*Math.PI*(HIST_DAYS-i)/365);          // mild annual drift
+    p *= 1 + m.vol*(rand(i*7.13 + mktKey.length*97)-0.5)*2*0.55;   // daily noise
+    const spike = rand(i*3.77 + 55);                                // occasional scarcity spikes
+    if (spike > 0.975) p *= 1.35 + 0.5*rand(i*9.1);
+    out.push({ date:d, price:Math.max(1.5, p) });
+  }
+  return out;
+}
+
+// Intraday 96-block shape (multipliers, mean = 1). Depends on market, month & scenario levers.
+function blockShape(mktKey, month, solarPct, peakPct){
+  const summer = (month >= 3 && month <= 8);        // Apr-Sep: deeper solar dip
+  const solarDepth = (mktKey === 'RTM' ? 0.34 : mktKey === 'GDAM' ? 0.22 : 0.28)
+                     * (solarPct/100) * (summer ? 1.1 : 0.85);
+  const peakLift = (mktKey === 'RTM' ? 0.55 : 0.45) * (peakPct/100);
+  const shape = [];
+  for (let b = 0; b < 96; b++){
+    const h = b/4;                                   // hour of day 0..24
+    let v = 1;
+    if (h < 5)                v = 0.86;                                     // night
+    else if (h < 9)           v = 0.86 + (h-5)/4 * 0.34;                    // morning ramp
+    else if (h < 10)          v = 1.20 - (h-9)*0.10;                        // post-morning
+    else if (h < 17)          v = 1.10 - solarDepth*Math.sin(Math.PI*(h-10)/7); // solar dip
+    else if (h < 18.5)        v = 1.02 + (h-17)/1.5 * 0.25;                 // evening ramp
+    else if (h < 23)          v = 1.27 + peakLift*Math.sin(Math.PI*(h-18.5)/4.5); // evening peak
+    else                      v = 1.05 - (h-23)*0.19;                       // wind-down
+    shape.push(v);
+  }
+  const mean = shape.reduce((a,c)=>a+c,0)/96;
+  return shape.map(v => v/mean);
+}
+
+// ==================== FORECAST MODELS ====================
+// Each returns { fc:[...horizon daily avgs], sigma:residualStd }
+function weeklyIndices(prices, dows){
+  const sums = Array(7).fill(0), cnts = Array(7).fill(0);
+  prices.forEach((p,i)=>{ sums[dows[i]] += p; cnts[dows[i]]++; });
+  const overall = prices.reduce((a,c)=>a+c,0)/prices.length;
+  return sums.map((s,i)=> cnts[i] ? (s/cnts[i])/overall : 1);
+}
+function stdev(arr){
+  if (!arr.length) return 0;
+  const m = arr.reduce((a,c)=>a+c,0)/arr.length;
+  return Math.sqrt(arr.reduce((a,c)=>a+(c-m)*(c-m),0)/arr.length);
+}
+
+function fSeasonalNaive(prices, dows, horizon){
+  const fc = [], res = [];
+  for (let i = 7; i < prices.length; i++) res.push(prices[i]-prices[i-7]);
+  for (let h = 0; h < horizon; h++) fc.push(prices[prices.length-7 + (h%7)]);
+  return { fc, sigma:stdev(res) };
+}
+function fMA7(prices, dows, horizon){
+  const ma = prices.slice(-7).reduce((a,c)=>a+c,0)/7;
+  const idx = weeklyIndices(prices, dows), lastDow = dows[dows.length-1];
+  const res = [];
+  for (let i = 7; i < prices.length; i++){
+    const m = prices.slice(i-7,i).reduce((a,c)=>a+c,0)/7;
+    res.push(prices[i]-m*idx[dows[i]]);
+  }
+  const fc = [];
+  for (let h = 1; h <= horizon; h++) fc.push(ma*idx[(lastDow+h)%7]);
+  return { fc, sigma:stdev(res) };
+}
+function fHoltWinters(prices, dows, horizon){
+  const idx = weeklyIndices(prices, dows);
+  const de = prices.map((p,i)=> p/idx[dows[i]]);                 // deseasonalize
+  const alpha = 0.3, beta = 0.05;
+  let level = de[0], trend = de[1]-de[0];
+  const res = [];
+  for (let i = 1; i < de.length; i++){
+    const prev = level + trend;
+    res.push((de[i]-prev)*idx[dows[i]]);
+    const nl = alpha*de[i] + (1-alpha)*(level+trend);
+    trend = beta*(nl-level) + (1-beta)*trend;
+    level = nl;
+  }
+  const lastDow = dows[dows.length-1], fc = [];
+  for (let h = 1; h <= horizon; h++) fc.push(Math.max(1, (level+trend*h)*idx[(lastDow+h)%7]));
+  return { fc, sigma:stdev(res) };
+}
+function fLinReg(prices, dows, horizon){
+  const idx = weeklyIndices(prices, dows);
+  const de = prices.map((p,i)=> p/idx[dows[i]]);
+  const n = de.length;
+  let sx=0, sy=0, sxy=0, sxx=0;
+  de.forEach((y,x)=>{ sx+=x; sy+=y; sxy+=x*y; sxx+=x*x; });
+  const slope = (n*sxy - sx*sy)/(n*sxx - sx*sx), inter = (sy - slope*sx)/n;
+  const res = de.map((y,x)=> (y-(inter+slope*x))*idx[dows[x]]);
+  const lastDow = dows[dows.length-1], fc = [];
+  for (let h = 1; h <= horizon; h++) fc.push(Math.max(1, (inter+slope*(n-1+h))*idx[(lastDow+h)%7]));
+  return { fc, sigma:stdev(res) };
+}
+const MODELS = {
+  hw:     { name:"Holt-Winters",    fn:fHoltWinters },
+  snaive: { name:"Seasonal Naive",  fn:fSeasonalNaive },
+  ma7:    { name:"7-Day Mov. Avg",  fn:fMA7 },
+  lr:     { name:"Linear + Weekly", fn:fLinReg }
+};
+
+// ==================== STATE & PIPELINE ====================
+const HISTORY = { DAM:genHistory('DAM'), RTM:genHistory('RTM'), GDAM:genHistory('GDAM') };
+let curMarket = 'DAM';
+let trendChart = null, blockChart = null;
+let lastResult = null;   // { days:[{date, avg, lo, hi, blocks:[96], bLo, bHi}], ... }
+
+function getParams(){
+  return {
+    exchange: document.getElementById('f-exchange').value,
+    horizon:  parseInt(document.getElementById('f-horizon').value),
+    model:    document.getElementById('f-model').value,
+    window:   parseInt(document.getElementById('f-window').value),
+    z:        parseFloat(document.getElementById('f-ci').value),
+    demand:   parseFloat(document.getElementById('a-demand').value),
+    solar:    parseFloat(document.getElementById('a-solar').value),
+    fuel:     parseFloat(document.getElementById('a-fuel').value),
+    peak:     parseFloat(document.getElementById('a-peak').value),
+    cap:      parseFloat(document.getElementById('a-cap').value) || 10,
+    floor:    parseFloat(document.getElementById('a-floor').value) || 0
+  };
+}
+
+function runForecast(mktKey, p){
+  const hist = HISTORY[mktKey];
+  const win = hist.slice(-p.window);
+  const prices = win.map(d=>d.price), dows = win.map(d=>d.date.getDay());
+  const { fc, sigma } = MODELS[p.model].fn(prices, dows, p.horizon);
+  const exAdj = EXCHANGES[p.exchange];
+  const scAdj = (1 + p.demand/100) * (1 + (p.fuel-100)/100*0.35);
+  const lastDate = hist[hist.length-1].date;
+  const days = fc.map((v,i)=>{
+    const date = addDays(lastDate, i+1);
+    const avg = v * exAdj * scAdj;
+    const grow = sigma * Math.sqrt(i+1) * p.z;
+    const shape = blockShape(mktKey, date.getMonth(), p.solar, p.peak);
+    const clamp = x => Math.min(p.cap, Math.max(p.floor, x));
+    return {
+      date,
+      avg: clamp(avg), lo: clamp(avg-grow), hi: clamp(avg+grow),
+      blocks: shape.map(s=>clamp(avg*s)),
+      bLo: shape.map(s=>clamp((avg-grow)*s)),
+      bHi: shape.map(s=>clamp((avg+grow)*s))
+    };
+  });
+  const trail30 = hist.slice(-30).reduce((a,c)=>a+c.price,0)/30;
+  return { days, trail30, sigma };
+}
+
+// ==================== RENDER ====================
+function blockTime(b){
+  const h1 = Math.floor(b/4), m1 = (b%4)*15;
+  const t = (h,m)=> String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+  const m2 = (m1+15)%60, h2 = m2===0 ? h1+1 : h1;
+  return t(h1,m1)+' - '+t(h2===24?0:h2,m2);
+}
+function slotTag(b){
+  const h = b/4;
+  if (h >= 18 && h < 23) return ['Peak','tag-red'];
+  if (h >= 10 && h < 17) return ['Solar','tag-green'];
+  if (h >= 5 && h < 10)  return ['Morning','tag-amber'];
+  if (h >= 23 || h < 5)  return ['Night','tag-gray'];
+  return ['Normal','tag-blue'];
+}
+
+function renderSummary(res, p){
+  const avg = res.days.reduce((a,c)=>a+c.avg,0)/res.days.length;
+  let pk = -1, pkDay = null, pkB = 0, mn = 1e9, mnDay = null, mnB = 0;
+  res.days.forEach(d => d.blocks.forEach((v,b)=>{
+    if (v > pk){ pk = v; pkDay = d; pkB = b; }
+    if (v < mn){ mn = v; mnDay = d; mnB = b; }
+  }));
+  const chg = (avg - res.trail30)/res.trail30*100;
+  document.getElementById('r-avg').textContent  = avg.toFixed(2);
+  document.getElementById('r-avg-sub').textContent = `${MARKETS[curMarket].name} · ${p.horizon} day${p.horizon>1?'s':''}`;
+  document.getElementById('r-peak').textContent = pk.toFixed(2);
+  document.getElementById('r-peak-sub').textContent = `${fmtShort(pkDay.date)} · ${blockTime(pkB)}`;
+  document.getElementById('r-min').textContent  = mn.toFixed(2);
+  document.getElementById('r-min-sub').textContent = `${fmtShort(mnDay.date)} · ${blockTime(mnB)}`;
+  const chgEl = document.getElementById('r-chg');
+  chgEl.textContent = (chg>=0?'+':'')+chg.toFixed(1)+'%';
+  chgEl.className = 'value ' + (chg >= 0 ? 'up' : 'down');
+  document.getElementById('r-chg-sub').textContent = `Trailing avg ${res.trail30.toFixed(2)} Rs/kWh`;
+}
+
+function renderCompare(p){
+  for (const k of ['DAM','RTM','GDAM']){
+    const r = runForecast(k, p);
+    const avg = r.days.reduce((a,c)=>a+c.avg,0)/r.days.length;
+    document.getElementById('cmp-'+k.toLowerCase()).textContent = avg.toFixed(2)+' ₹/kWh';
+  }
+}
+
+function renderTrend(res, p){
+  const hist = HISTORY[curMarket].slice(-SHOW_HIST);
+  const labels = [...hist.map(d=>fmtShort(d.date)), ...res.days.map(d=>fmtShort(d.date))];
+  const histData = [...hist.map(d=>+d.price.toFixed(3)), ...Array(res.days.length).fill(null)];
+  const pad = Array(hist.length-1).fill(null);
+  const bridge = +hist[hist.length-1].price.toFixed(3);
+  const fcData = [...pad, bridge, ...res.days.map(d=>+d.avg.toFixed(3))];
+  const loData = [...pad, bridge, ...res.days.map(d=>+d.lo.toFixed(3))];
+  const hiData = [...pad, bridge, ...res.days.map(d=>+d.hi.toFixed(3))];
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById('chartTrend'), {
+    type:'line',
+    data:{ labels, datasets:[
+      { label:'Historical', data:histData, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', borderWidth:2, pointRadius:0, tension:0.25, fill:true },
+      { label:'Forecast', data:fcData, borderColor:'#10b981', borderWidth:2.5, borderDash:[6,4], pointRadius:2, tension:0.25 },
+      { label:'Upper', data:hiData, borderColor:'rgba(16,185,129,0)', pointRadius:0, fill:false },
+      { label:'Lower', data:loData, borderColor:'rgba(16,185,129,0)', backgroundColor:'rgba(16,185,129,0.14)', pointRadius:0, fill:'-1' }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{labels:{filter:i=>['Historical','Forecast'].includes(i.text), boxWidth:14, font:{size:11}}} },
+      scales:{ x:{ticks:{maxTicksLimit:14,font:{size:10}},grid:{display:false}},
+               y:{title:{display:true,text:'Rs/kWh',font:{size:11}},ticks:{font:{size:10}}} }
+    }
+  });
+}
+
+function renderIntraday(){
+  if (!lastResult) return;
+  const sel = document.getElementById('f-day');
+  const di = Math.min(parseInt(sel.value||'0'), lastResult.days.length-1);
+  const d = lastResult.days[di];
+  const labels = Array.from({length:96},(_,b)=> b%8===0 ? String(Math.floor(b/4)).padStart(2,'0')+':00' : '');
+  if (blockChart) blockChart.destroy();
+  blockChart = new Chart(document.getElementById('chartBlocks'), {
+    type:'line',
+    data:{ labels:Array.from({length:96},(_,b)=>blockTime(b)), datasets:[
+      { label:'Forecast', data:d.blocks.map(v=>+v.toFixed(3)), borderColor:'#1e3a5f', backgroundColor:'rgba(30,58,95,0.10)', borderWidth:2, pointRadius:0, tension:0.3, fill:true },
+      { label:'Upper', data:d.bHi.map(v=>+v.toFixed(3)), borderColor:'rgba(0,0,0,0)', pointRadius:0 },
+      { label:'Lower', data:d.bLo.map(v=>+v.toFixed(3)), borderColor:'rgba(0,0,0,0)', backgroundColor:'rgba(245,158,11,0.12)', pointRadius:0, fill:'-1' }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{display:false} },
+      scales:{ x:{ticks:{maxTicksLimit:12,font:{size:9},callback:(v,i)=> i%8===0 ? String(Math.floor(i/4)).padStart(2,'0')+':00' : ''},grid:{display:false}},
+               y:{title:{display:true,text:'Rs/kWh',font:{size:11}},ticks:{font:{size:10}}} }
+    }
+  });
+  renderTable(d);
+}
+
+function renderTable(d){
+  document.getElementById('tbl-day').textContent = '— ' + d.date.toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+  const rows = d.blocks.map((v,b)=>{
+    const [nm,cls] = slotTag(b);
+    return `<tr><td>${b+1}</td><td>${blockTime(b)}</td><td><b>${v.toFixed(3)}</b></td><td>${d.bLo[b].toFixed(3)}</td><td>${d.bHi[b].toFixed(3)}</td><td><span class="tag ${cls}">${nm}</span></td></tr>`;
+  });
+  document.getElementById('tbl-body').innerHTML = rows.join('');
+}
+
+function populateDaySelect(res){
+  const sel = document.getElementById('f-day');
+  const prev = sel.value;
+  sel.innerHTML = res.days.map((d,i)=>`<option value="${i}">${d.date.toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short'})}</option>`).join('');
+  if (prev && parseInt(prev) < res.days.length) sel.value = prev;
+}
+
+function recalc(){
+  const p = getParams();
+  document.getElementById('v-demand').textContent = (p.demand>=0?'+':'')+p.demand+'%';
+  document.getElementById('v-solar').textContent = p.solar+'%';
+  document.getElementById('v-fuel').textContent = p.fuel+'%';
+  document.getElementById('v-peak').textContent = p.peak+'%';
+  document.getElementById('model-tag').textContent = MODELS[p.model].name;
+  document.getElementById('trend-title').textContent = `Daily Avg MCP — ${MARKETS[curMarket].name} (${p.exchange})`;
+  lastResult = runForecast(curMarket, p);
+  renderSummary(lastResult, p);
+  renderCompare(p);
+  renderTrend(lastResult, p);
+  populateDaySelect(lastResult);
+  renderIntraday();
+}
+
+function downloadCSV(){
+  if (!lastResult) return;
+  const p = getParams();
+  let csv = 'Market,Exchange,Date,Block,Time,Forecast (Rs/kWh),Low,High,Slot\n';
+  lastResult.days.forEach(d => d.blocks.forEach((v,b)=>{
+    csv += `${curMarket},${p.exchange},${fmtDate(d.date)},${b+1},${blockTime(b)},${v.toFixed(3)},${d.bLo[b].toFixed(3)},${d.bHi[b].toFixed(3)},${slotTag(b)[0]}\n`;
+  }));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `${curMarket}_forecast_${fmtDate(lastResult.days[0].date)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function resetAll(){
+  document.getElementById('f-exchange').value = 'IEX';
+  document.getElementById('f-horizon').value = '7';
+  document.getElementById('f-model').value = 'hw';
+  document.getElementById('f-window').value = '90';
+  document.getElementById('f-ci').value = '1.28';
+  document.getElementById('a-demand').value = 0;
+  document.getElementById('a-solar').value = 100;
+  document.getElementById('a-fuel').value = 100;
+  document.getElementById('a-peak').value = 100;
+  document.getElementById('a-cap').value = 10;
+  document.getElementById('a-floor').value = 0;
+  recalc();
+}
+
+document.querySelectorAll('.market-tab').forEach(t => t.addEventListener('click', ()=>{
+  document.querySelectorAll('.market-tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  curMarket = t.dataset.mkt;
+  recalc();
+}));
+
+recalc();
+</script>
+</body>
+</html>
