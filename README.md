@@ -15,8 +15,14 @@ Companion app to [powerlogic](https://github.com/jai2k701/powerlogic) (Industria
 ## Run
 
 ```
-python backend/server.py        # http://localhost:8123 — app + real IEX data from SQLite
+streamlit run streamlit_app.py   # http://localhost:8510 — Streamlit version (recommended)
+python backend/server.py         # http://localhost:8123 — HTML version + API
 ```
+
+The Streamlit app reads the local SQLite DB (or the repo CSV snapshots on cloud hosting)
+and tops up missing recent days by scraping IEX directly. Deploy free on
+[Streamlit Community Cloud](https://share.streamlit.io): New app → repo
+`jai2k701/powerlogic-forecast` → main file `streamlit_app.py`.
 
 The frontend boots instantly on synthetic data, then swaps in real prices from the backend
 (`LIVE DB · IEX` tag in the header). Opened as a plain file or on GitHub Pages (no backend),
