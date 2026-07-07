@@ -21,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "iex_prices.db"
 DAILY_CSV = BASE_DIR / "data" / "daily_prices.csv"
 BLOCKS_CSV = BASE_DIR / "data" / "blocks_recent.csv"
+FUND_CSV = BASE_DIR / "data" / "daily_fundamentals.csv"
 sys.path.insert(0, str(BASE_DIR / "scraper"))
 
 MARKETS = {"DAM": "Day-Ahead Market", "RTM": "Real-Time Market",
@@ -56,9 +57,25 @@ def load_data():
         st.error("No data found: neither data/iex_prices.db nor data/*.csv exist. "
                  "Run `python scraper/iex_scraper.py --backfill 365` first.")
         st.stop()
+    fund = pd.DataFrame()
+    if DB_PATH.exists():
+        con = sqlite3.connect(DB_PATH)
+        try:
+            fund = pd.read_sql_query(
+                """SELECT fund_date AS date, energy_met_mu, peak_demand_mw,
+                          hydro_mu, wind_mu, solar_mu
+                   FROM daily_fundamentals WHERE energy_met_mu IS NOT NULL
+                   ORDER BY fund_date""", con)
+        except Exception:                              # noqa: BLE001
+            pass
+        con.close()
+    elif FUND_CSV.exists():
+        fund = pd.read_csv(FUND_CSV)
     daily["date"] = pd.to_datetime(daily["date"]).dt.date
     blocks["date"] = pd.to_datetime(blocks["date"]).dt.date
-    return daily, blocks, source
+    if not fund.empty:
+        fund["date"] = pd.to_datetime(fund["date"]).dt.date
+    return daily, blocks, fund, source
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner="Fetching latest prices from IEX…")
@@ -119,13 +136,13 @@ def stdev(a):
     return math.sqrt(sum((x - m) ** 2 for x in a) / len(a))
 
 
-def f_seasonal_naive(prices, dows, horizon):
+def f_seasonal_naive(prices, dows, horizon, feats=None):
     res = [prices[i] - prices[i - 7] for i in range(7, len(prices))]
     fc = [prices[len(prices) - 7 + h % 7] for h in range(horizon)]
     return fc, stdev(res)
 
 
-def f_ma7(prices, dows, horizon):
+def f_ma7(prices, dows, horizon, feats=None):
     idx = weekly_indices(prices, dows)
     ma = sum(prices[-7:]) / 7
     res = [prices[i] - (sum(prices[i - 7:i]) / 7) * idx[dows[i]]
@@ -153,17 +170,71 @@ def hw_engine(prices, dows, horizon, alpha, beta, phi):
     return fc, stdev(res)
 
 
-def f_holt_winters(prices, dows, horizon):
+def f_holt_winters(prices, dows, horizon, feats=None):
     return hw_engine(prices, dows, horizon, 0.3, 0.05, 1.0)
 
 
-def f_adaptive_hw(prices, dows, horizon):
+def f_adaptive_hw(prices, dows, horizon, feats=None):
     # Backtested on real DAM data: fast smoothing + damped trend cuts D+1 MAPE
     # from ~20% to ~17% and halves the error in fast-moving weeks.
     return hw_engine(prices, dows, horizon, 0.55, 0.15, 0.85)
 
 
-def f_linreg(prices, dows, horizon):
+def ols_solve(X, Y, ridge=1e-6):
+    """Least squares via normal equations + Gaussian elimination (pure python)."""
+    k = len(X[0])
+    A = [[sum(x[i] * x[j] for x in X) + (ridge if i == j else 0)
+          for j in range(k)] for i in range(k)]
+    b = [sum(x[i] * y for x, y in zip(X, Y)) for i in range(k)]
+    for col in range(k):
+        piv = max(range(col, k), key=lambda r: abs(A[r][col]))
+        if abs(A[piv][col]) < 1e-12:
+            return None
+        A[col], A[piv] = A[piv], A[col]
+        b[col], b[piv] = b[piv], b[col]
+        for r in range(col + 1, k):
+            f = A[r][col] / A[col][col]
+            for c in range(col, k):
+                A[r][c] -= f * A[col][c]
+            b[r] -= f * b[col]
+    beta = [0.0] * k
+    for r in range(k - 1, -1, -1):
+        beta[r] = (b[r] - sum(A[r][c] * beta[c] for c in range(r + 1, k))) / A[r][r]
+    return beta
+
+
+def f_fundamentals(prices, dows, horizon, feats=None):
+    """Regress deseasonalized price on all-India energy met + solar + wind (MU).
+    Future fundamentals use 3-day persistence. Falls back to adaptive HW when
+    fundamentals coverage is thin."""
+    if not feats or sum(1 for f in feats if f) < max(30, len(prices) * 0.6):
+        return f_adaptive_hw(prices, dows, horizon)
+    idx = weekly_indices(prices, dows)
+    de = [p / idx[d] for p, d in zip(prices, dows)]
+    pairs = [(f, y) for f, y in zip(feats, de) if f]
+    X = [[1.0, f[0] / 1000, f[1] / 100, f[2] / 100] for f, _ in pairs]
+    Y = [y for _, y in pairs]
+    beta = ols_solve(X, Y)
+    if beta is None:
+        return f_adaptive_hw(prices, dows, horizon)
+    dot = lambda x: sum(a * b for a, b in zip(x, beta))    # noqa: E731
+    res = [y - dot(x) for x, y in zip(X, Y)]
+    lastf = [f for f in feats if f][-3:]
+    ff = [sum(v[i] for v in lastf) / len(lastf) for i in range(3)]
+    base = dot([1.0, ff[0] / 1000, ff[1] / 100, ff[2] / 100])
+    fc = [max(0.5, base * idx[(dows[-1] + h) % 7]) for h in range(1, horizon + 1)]
+    return fc, stdev(res)
+
+
+def f_hybrid(prices, dows, horizon, feats=None):
+    """Mean of adaptive HW (captures momentum) and fundamentals regression
+    (captures demand/RE level) — often steadier than either alone."""
+    f1, s1 = f_adaptive_hw(prices, dows, horizon)
+    f2, s2 = f_fundamentals(prices, dows, horizon, feats)
+    return [(a + b) / 2 for a, b in zip(f1, f2)], (s1 + s2) / 2
+
+
+def f_linreg(prices, dows, horizon, feats=None):
     idx = weekly_indices(prices, dows)
     de = [p / idx[d] for p, d in zip(prices, dows)]
     n = len(de)
@@ -178,7 +249,9 @@ def f_linreg(prices, dows, horizon):
 
 
 MODELS = {
-    "Adaptive Holt-Winters (fast + damped) — recommended": f_adaptive_hw,
+    "Adaptive Holt-Winters (fast + damped)": f_adaptive_hw,
+    "Hybrid — Adaptive HW + Fundamentals": f_hybrid,
+    "Fundamentals Regression (demand + RE)": f_fundamentals,
     "Holt-Winters (trend + weekly seasonality)": f_holt_winters,
     "Seasonal Naive (same day last week)": f_seasonal_naive,
     "7-Day Moving Average": f_ma7,
@@ -187,20 +260,37 @@ MODELS = {
 AUTO_MODEL = "Auto — pick backtest winner"
 
 
+def build_feats(dates, fund):
+    """(energy_met, solar, wind) tuple per date, forward-filled; None when unknown."""
+    if fund is None or fund.empty:
+        return [None] * len(dates)
+    lookup = {r.date: (r.energy_met_mu, r.solar_mu, r.wind_mu)
+              for r in fund.itertuples() if pd.notna(r.energy_met_mu)}
+    feats, last = [], None
+    for d in dates:
+        v = lookup.get(d)
+        if v is not None and all(pd.notna(x) for x in v):
+            last = tuple(float(x) for x in v)
+        feats.append(last)
+    return feats
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def rolling_backtest(daily, market, window, n_days=30):
+def rolling_backtest(daily, fund, market, window, n_days=30):
     """Walk-forward D+1 backtest of every model over the last n_days.
     Returns {model: {'dates', 'actual', 'forecast', 'mape', 'mae'}}."""
     ser = daily[daily["market"] == market].sort_values("date")
     prices = ser["avg_mcp_rs_kwh"].tolist()
     dts = ser["date"].tolist()
     dows = [d.weekday() for d in dts]
+    feats = build_feats(dts, fund)
     out = {}
     start = max(window, len(prices) - n_days)
     for name, fn in MODELS.items():
         dates, actual, fcs = [], [], []
         for i in range(start, len(prices)):
-            fc, _ = fn(prices[i - window:i], dows[i - window:i], 1)
+            fc, _ = fn(prices[i - window:i], dows[i - window:i], 1,
+                       feats[i - window:i])
             dates.append(dts[i])
             actual.append(prices[i])
             fcs.append(fc[0])
@@ -231,12 +321,13 @@ def intraday_shape(blocks, market, shape_days, solar_pct, peak_pct):
     return [v / mean for v in out]
 
 
-def run_forecast(daily, blocks, market, model_name, window, horizon, z,
+def run_forecast(daily, blocks, fund, market, model_name, window, horizon, z,
                  demand, solar, fuel, peak_stress, cap, floor, shape_days):
     ser = daily[daily["market"] == market].sort_values("date").tail(window)
     prices = ser["avg_mcp_rs_kwh"].tolist()
     dows = [d.weekday() for d in ser["date"]]
-    fc, sigma = MODELS[model_name](prices, dows, horizon)
+    feats = build_feats(ser["date"].tolist(), fund)
+    fc, sigma = MODELS[model_name](prices, dows, horizon, feats)
     adj = (1 + demand / 100) * (1 + (fuel - 100) / 100 * 0.35)
     shape = intraday_shape(blocks, market, shape_days, solar, peak_stress)
     clamp = lambda x: min(cap, max(floor, x))            # noqa: E731
@@ -284,7 +375,7 @@ st.markdown(
     <span style="color:#94a3b8;font-size:13px">DAM / RTM / G-DAM · real IEX data ·
     96-block intraday analysis</span></div>""", unsafe_allow_html=True)
 
-daily, blocks, source = load_data()
+daily, blocks, fund, source = load_data()
 daily, blocks, topped = top_up(daily, blocks)
 
 with st.sidebar:
@@ -308,13 +399,13 @@ with st.sidebar:
     cap = st.number_input("Ceiling (Rs/kWh)", 1.0, 20.0, 10.0, 0.5)
     floor = st.number_input("Floor (Rs/kWh)", 0.0, 5.0, 0.0, 0.5)
 
-bt = rolling_backtest(daily, market, window)
+bt = rolling_backtest(daily, fund, market, window)
 if model_name == AUTO_MODEL:
     model_name = min(bt, key=lambda m: bt[m]["mape"])
     st.info(f"🏆 Auto-selected **{model_name}** — lowest MAPE "
             f"({bt[model_name]['mape']:.1f}%) in the 30-day walk-forward backtest.")
 
-days, trail30, hist = run_forecast(daily, blocks, market, model_name, window,
+days, trail30, hist = run_forecast(daily, blocks, fund, market, model_name, window,
                                    horizon, z, demand, solar, fuel, peak_stress,
                                    cap, floor, shape_days)
 
@@ -341,7 +432,7 @@ c4.metric("vs trailing 30-day avg", f"{chg:+.1f}%", f"trailing {trail30:.2f} Rs/
 # ---- market comparison chips
 cols = st.columns(3)
 for col, mk in zip(cols, MARKETS):
-    d2, _, _ = run_forecast(daily, blocks, mk, model_name, window, horizon, z,
+    d2, _, _ = run_forecast(daily, blocks, fund, mk, model_name, window, horizon, z,
                             demand, solar, fuel, peak_stress, cap, floor, shape_days)
     a = sum(x["avg"] for x in d2) / len(d2)
     col.metric({"DAM": "DAM avg", "RTM": "RTM avg", "GDAM": "G-DAM avg"}[mk],
@@ -423,7 +514,8 @@ prior_daily = daily[(daily["market"] == market) & (daily["date"] < last_day)]
 if len(prior_daily) >= window:
     ser_p = prior_daily.sort_values("date").tail(window)
     fc1, _ = MODELS[model_name](ser_p["avg_mcp_rs_kwh"].tolist(),
-                                [d.weekday() for d in ser_p["date"]], 1)
+                                [d.weekday() for d in ser_p["date"]], 1,
+                                build_feats(ser_p["date"].tolist(), fund))
     shp = intraday_shape(blocks[blocks["date"] < last_day], market,
                          shape_days, 100, 100)
     pred_b = [fc1[0] * s for s in shp]
@@ -448,6 +540,38 @@ if len(prior_daily) >= window:
                                   ticktext=[t[:5] for t in xt[:n:8]]),
                        legend=dict(orientation="h", y=1.14), hovermode="x unified")
     st.plotly_chart(fig4, width="stretch")
+
+# ---- demand & RE fundamentals (Grid-India NLDC PSP reports)
+if fund is not None and not fund.empty:
+    with st.expander("🇮🇳 All-India Demand & RE Generation (Grid-India daily PSP reports)",
+                     expanded=False):
+        fshow = fund.sort_values("date").tail(90)
+        fc1, fc2 = st.columns(2)
+        last = fshow.iloc[-1]
+        fc1.metric("Energy met (latest day)", f"{last['energy_met_mu']:,.0f} MU",
+                   f"{last['date']:%d %b %Y}", delta_color="off")
+        pk = last.get("peak_demand_mw")
+        fc2.metric("Peak demand met", f"{pk:,.0f} MW" if pd.notna(pk) else "—",
+                   f"{last['date']:%d %b %Y}", delta_color="off")
+        figd = go.Figure()
+        figd.add_trace(go.Scatter(x=list(fshow["date"]), y=list(fshow["energy_met_mu"]),
+                                  name="Energy met", line=dict(color=ACTUAL_C, width=2),
+                                  fill="tozeroy", fillcolor="rgba(37,99,235,0.07)"))
+        figd.update_layout(title="All-India Energy Met (MU/day)", yaxis_title="MU",
+                           height=280, margin=dict(t=45, b=10), hovermode="x unified")
+        st.plotly_chart(figd, width="stretch")
+        figr = go.Figure()
+        figr.add_trace(go.Scatter(x=list(fshow["date"]), y=list(fshow["solar_mu"]),
+                                  name="Solar", line=dict(color="#d97706", width=2)))
+        figr.add_trace(go.Scatter(x=list(fshow["date"]), y=list(fshow["wind_mu"]),
+                                  name="Wind", line=dict(color="#0d9488", width=2)))
+        figr.update_layout(title="RE Generation (MU/day)", yaxis_title="MU",
+                           height=280, margin=dict(t=45, b=10),
+                           legend=dict(orientation="h", y=1.16), hovermode="x unified")
+        st.plotly_chart(figr, width="stretch")
+        st.caption("Source: Grid-India (NLDC) Daily PSP Reports, scraped into "
+                   "daily_fundamentals. These series feed the Fundamentals "
+                   "Regression and Hybrid forecast models.")
 
 # ---- block table + CSV
 tbl = pd.DataFrame({

@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "iex_prices.db"
 OUT_DAILY = BASE_DIR / "data" / "daily_prices.csv"
 OUT_BLOCKS = BASE_DIR / "data" / "blocks_recent.csv"
+OUT_FUND = BASE_DIR / "data" / "daily_fundamentals.csv"
 
 
 def main():
@@ -36,9 +37,26 @@ def main():
         w = csv.writer(f)
         w.writerow(["market", "date", "block", "mcp_rs_mwh"])
         w.writerows(blocks)
+
+    n_fund = 0
+    try:
+        fund = con.execute(
+            """SELECT fund_date, energy_met_mu, peak_demand_mw, evening_peak_mw,
+                      hydro_mu, wind_mu, solar_mu, shortage_mu
+               FROM daily_fundamentals WHERE energy_met_mu IS NOT NULL
+               ORDER BY fund_date""").fetchall()
+        with open(OUT_FUND, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["date", "energy_met_mu", "peak_demand_mw", "evening_peak_mw",
+                        "hydro_mu", "wind_mu", "solar_mu", "shortage_mu"])
+            w.writerows(fund)
+        n_fund = len(fund)
+    except sqlite3.OperationalError:
+        pass                       # table not created yet
     con.close()
     print(f"exported {len(daily)} daily rows -> {OUT_DAILY.name}, "
-          f"{len(blocks)} block rows -> {OUT_BLOCKS.name}")
+          f"{len(blocks)} block rows -> {OUT_BLOCKS.name}, "
+          f"{n_fund} fundamentals rows -> {OUT_FUND.name}")
 
 
 if __name__ == "__main__":
