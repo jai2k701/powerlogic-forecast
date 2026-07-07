@@ -280,10 +280,9 @@ st.caption(f"Data source: **{source}**{' + live IEX top-up' if topped else ''} Â
 
 # ---- summary metrics
 avg_fc = sum(d["avg"] for d in days) / len(days)
-peak_val, peak_day, peak_b = max(((v, d, b) for d in days
-                                  for b, v in enumerate(d["blocks"], 1)))
-min_val, min_day, min_b = min(((v, d, b) for d in days
-                               for b, v in enumerate(d["blocks"], 1)))
+flat = [(v, d, b) for d in days for b, v in enumerate(d["blocks"], 1)]
+peak_val, peak_day, peak_b = max(flat, key=lambda t: t[0])
+min_val, min_day, min_b = min(flat, key=lambda t: t[0])
 chg = (avg_fc - trail30) / trail30 * 100
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Forecast avg (Rs/kWh)", f"{avg_fc:.2f}", f"{horizon} day(s)", delta_color="off")
