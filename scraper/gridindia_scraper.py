@@ -130,8 +130,10 @@ def parse_psp_pdf(path):
     out["energy_met_mu"] = grab(r"Energy Met \(MU\)((?:\s+" + NUM + r"){6})")
     out["evening_peak_mw"] = grab(
         r"Evening Peak hrs\s*\(MW\).*?RLDCs\)((?:\s+" + NUM + r"){6})")
+    # numbers follow "(From ...)" in new reports but precede it in pre-2026 ones
     out["peak_demand_mw"] = grab(
-        r"Maximum Demand Met During the Day.*?\(From[^)]*\)((?:\s+" + NUM + r"){6})")
+        r"Maximum Demand Met During the Day\s*\(MW\)\s*(?:\(From[^)]*\))?"
+        r"((?:\s+" + NUM + r"){6})")
     out["hydro_mu"] = grab(r"Hydro Gen \(MU\)((?:\s+" + NUM + r"){6})")
     out["wind_mu"] = grab(r"Wind Gen \(MU\)((?:\s+" + NUM + r"){6})")
     out["solar_mu"] = grab(r"Solar Gen \(MU\)\*?((?:\s+" + NUM + r"){6})")
@@ -164,7 +166,8 @@ def main():
     todo = [r for r in reports if r[0].isoformat() not in have]
     log(f"PSP: {len(reports)} reports listed, {len(todo)} new to fetch")
 
-    tmp = BASE_DIR / "data" / "_psp_tmp.pdf"
+    import tempfile
+    tmp = Path(tempfile.gettempdir()) / "psp_report_tmp.pdf"
     ok = 0
     for d, url, title in todo:
         try:
