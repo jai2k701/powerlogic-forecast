@@ -1,3 +1,4 @@
 data/*.db
+data/_psp_tmp.pdf
 scraper/scraper.log
 __pycache__/
