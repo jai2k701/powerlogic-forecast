@@ -46,6 +46,8 @@ def load_frames(market):
 def build_features(px, fund, wx, vre=None):
     wide = px.pivot(index="d", columns="b", values="p").sort_index()
     wide = wide.asfreq("D")                       # explicit gaps
+    # one extra day so the next uncleared delivery day gets feature rows
+    wide = wide.reindex(wide.index.union([wide.index.max() + pd.Timedelta(days=1)]))
     davg = wide.mean(axis=1)
 
     frames = []
@@ -161,10 +163,36 @@ def walk_forward(feat, eval_days, retrain_every=7):
     return pd.concat(preds), model
 
 
+def emit(feat, market, eval_days=30):
+    """Write backtest + next-day forecast to data/ml_forecast.csv for the app."""
+    out = DB_PATH.parent / "ml_forecast.csv"
+    res, _ = walk_forward(feat, eval_days)
+    rows = [{"kind": "backtest", "date": d.date(), "block": "",
+             "actual": round(g["y"].mean(), 4), "pred": round(g["pred"].mean(), 4)}
+            for d, g in res.groupby("day")]
+    tr = feat[feat["y"].notna() & feat["lag1"].notna()]
+    model = lgb.LGBMRegressor(**PARAMS)
+    model.fit(tr[FEATURES], np.log(tr["y"].clip(lower=0.05)))
+    target = tr["day"].max() + pd.Timedelta(days=1)
+    te = feat[(feat["day"] == target) & feat["lag1"].notna()]
+    if not te.empty:
+        p = np.exp(model.predict(te[FEATURES])).clip(0.05, 10.0)
+        rows.append({"kind": "next_day", "date": target.date(), "block": "",
+                     "actual": "", "pred": round(float(p.mean()), 4)})
+        rows += [{"kind": "next_block", "date": target.date(), "block": int(b),
+                  "actual": "", "pred": round(float(v), 4)}
+                 for b, v in zip(te["block"], p)]
+    pd.DataFrame(rows).to_csv(out, index=False)
+    print(f"emitted {len(rows)} rows -> {out.name} "
+          f"(market {market}, next day {target.date() if not te.empty else 'n/a'})")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--market", default="DAM")
     ap.add_argument("--eval-days", type=int, default=60)
+    ap.add_argument("--emit", action="store_true",
+                    help="write data/ml_forecast.csv for the Streamlit app")
     args = ap.parse_args()
 
     px, fund, wx, vre = load_frames(args.market)
@@ -172,6 +200,9 @@ def main():
           f"{len(fund)} fundamentals days, {len(wx)} weather days, "
           f"{len(vre)} VRE schedule days")
     feat = build_features(px, fund, wx, vre)
+    if args.emit:
+        emit(feat, args.market, min(args.eval_days, 30))
+        return
     res, model = walk_forward(feat, args.eval_days)
     print(f"\nWalk-forward D+1, last {args.eval_days} days "
           f"({res['day'].min():%d-%b} .. {res['day'].max():%d-%b}), "
