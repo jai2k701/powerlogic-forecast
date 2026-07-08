@@ -120,7 +120,10 @@ FEATURES = ["lag1", "lag2", "lag3", "lag7", "block_roll7", "block_std7",
             "hydro_mu_3d", "tmax", "tmin", "tmax_lag1", "tmax_3d", "cdd",
             "dow", "month", "is_weekend", "is_holiday", "doy_sin", "doy_cos",
             "block", "blk_sin", "blk_cos", "shape_lag1",
-            "wind_sched", "solar_sched", "wind_dev_lag2", "solar_dev_lag2"]
+            # day-ahead RE schedule helps; its D-2 deviation lags tested WORSE
+            # (ablation 2026-07-08: sched-only 9.4%/9.3% MAPE vs 11.1%/10.2% with
+            # dev lags) so they are computed but deliberately excluded here
+            "wind_sched", "solar_sched"]
 
 PARAMS = dict(objective="l1", n_estimators=700, learning_rate=0.045,
               num_leaves=63, min_child_samples=40, subsample=0.9,
