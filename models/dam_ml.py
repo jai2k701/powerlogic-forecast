@@ -30,13 +30,20 @@ def load_frames(market):
            FROM daily_fundamentals WHERE energy_met_mu IS NOT NULL""", con)
     wx = pd.read_sql_query(
         "SELECT wx_date AS d, tmax_c, tmin_c FROM daily_weather", con)
+    try:
+        vre = pd.read_sql_query(
+            """SELECT vre_date AS d, wind_sched_mu, wind_actual_mu,
+                      solar_sched_mu, solar_actual_mu FROM vre_schedule""", con)
+    except Exception:                                  # noqa: BLE001
+        vre = pd.DataFrame(columns=["d"])
     con.close()
-    for f in (px, fund, wx):
-        f["d"] = pd.to_datetime(f["d"])
-    return px, fund, wx
+    for f in (px, fund, wx, vre):
+        if not f.empty:
+            f["d"] = pd.to_datetime(f["d"])
+    return px, fund, wx, vre
 
 
-def build_features(px, fund, wx):
+def build_features(px, fund, wx, vre=None):
     wide = px.pivot(index="d", columns="b", values="p").sort_index()
     wide = wide.asfreq("D")                       # explicit gaps
     davg = wide.mean(axis=1)
@@ -72,6 +79,20 @@ def build_features(px, fund, wx):
                             .mean().reindex(day_frame["day"]).values)
     day_frame["cdd"] = np.maximum(0, day_frame["tmax"] - 24)
 
+    if vre is not None and not vre.empty:
+        v = vre.set_index("d").asfreq("D").ffill(limit=5)
+        # Day-ahead schedule for the DELIVERY day — known before the DAM auction
+        day_frame["wind_sched"] = v["wind_sched_mu"].reindex(day_frame["day"]).values
+        day_frame["solar_sched"] = v["solar_sched_mu"].reindex(day_frame["day"]).values
+        # Latest observable forecast error (report lags ~2 days at bid time)
+        wdev = v["wind_actual_mu"] - v["wind_sched_mu"]
+        sdev = v["solar_actual_mu"] - v["solar_sched_mu"]
+        day_frame["wind_dev_lag2"] = wdev.shift(2).reindex(day_frame["day"]).values
+        day_frame["solar_dev_lag2"] = sdev.shift(2).reindex(day_frame["day"]).values
+    else:
+        for c in ("wind_sched", "solar_sched", "wind_dev_lag2", "solar_dev_lag2"):
+            day_frame[c] = np.nan
+
     ind_hols = holidays.country_holidays("IN")
     day_frame["dow"] = day_frame["day"].dt.dayofweek
     day_frame["month"] = day_frame["day"].dt.month
@@ -98,7 +119,8 @@ FEATURES = ["lag1", "lag2", "lag3", "lag7", "block_roll7", "block_std7",
             "solar_mu_3d", "wind_mu_lag1", "wind_mu_3d", "hydro_mu_lag1",
             "hydro_mu_3d", "tmax", "tmin", "tmax_lag1", "tmax_3d", "cdd",
             "dow", "month", "is_weekend", "is_holiday", "doy_sin", "doy_cos",
-            "block", "blk_sin", "blk_cos", "shape_lag1"]
+            "block", "blk_sin", "blk_cos", "shape_lag1",
+            "wind_sched", "solar_sched", "wind_dev_lag2", "solar_dev_lag2"]
 
 PARAMS = dict(objective="l1", n_estimators=700, learning_rate=0.045,
               num_leaves=63, min_child_samples=40, subsample=0.9,
@@ -142,10 +164,11 @@ def main():
     ap.add_argument("--eval-days", type=int, default=60)
     args = ap.parse_args()
 
-    px, fund, wx = load_frames(args.market)
+    px, fund, wx, vre = load_frames(args.market)
     print(f"{args.market}: {px['d'].nunique()} days of block prices, "
-          f"{len(fund)} fundamentals days, {len(wx)} weather days")
-    feat = build_features(px, fund, wx)
+          f"{len(fund)} fundamentals days, {len(wx)} weather days, "
+          f"{len(vre)} VRE schedule days")
+    feat = build_features(px, fund, wx, vre)
     res, model = walk_forward(feat, args.eval_days)
     print(f"\nWalk-forward D+1, last {args.eval_days} days "
           f"({res['day'].min():%d-%b} .. {res['day'].max():%d-%b}), "
