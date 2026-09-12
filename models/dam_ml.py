@@ -7,7 +7,9 @@ forecast, calendar), so the backtest is an honest D+1 simulation.
 Usage: python models/dam_ml.py [--eval-days 60] [--market DAM]
 """
 import argparse
+import os
 import sqlite3
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -182,7 +184,17 @@ def emit(feat, market, eval_days=30):
         rows += [{"kind": "next_block", "date": target.date(), "block": int(b),
                   "actual": "", "pred": round(float(v), 4)}
                  for b, v in zip(te["block"], p)]
-    pd.DataFrame(rows).to_csv(out, index=False)
+    # Write via temp + atomic replace: opening the CSV in Excel holds an exclusive
+    # lock, and a direct to_csv would leave a half-written file (or, before this,
+    # fail deep inside pandas with a bare PermissionError).
+    tmp = out.with_name(out.name + ".tmp")
+    pd.DataFrame(rows).to_csv(tmp, index=False)
+    try:
+        os.replace(tmp, out)
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        sys.exit(f"ERROR: cannot write {out.name} — it is open in another program "
+                 f"(Excel locks CSV files exclusively). Close it and re-run.")
     print(f"emitted {len(rows)} rows -> {out.name} "
           f"(market {market}, next day {target.date() if not te.empty else 'n/a'})")
 

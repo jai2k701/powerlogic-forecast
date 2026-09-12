@@ -1,0 +1,12 @@
+# Full local pipeline (scrapers + ML + app), installed into .venv.
+# Kept separate from requirements.txt, which is what Streamlit Cloud installs —
+# the cloud app only reads the CSV snapshots and must not pull lightgbm/pdfplumber.
+pandas>=2.0
+numpy>=1.26
+plotly>=5.20
+streamlit>=1.40
+pdfplumber>=0.11        # Grid-India PSP / VRE report parsing
+lightgbm>=4.0           # DAM price model
+scikit-learn>=1.4       # required by lightgbm.sklearn (LGBMRegressor)
+holidays>=0.40          # calendar features
+xlrd>=2.0               # legacy .xls reports

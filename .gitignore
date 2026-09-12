@@ -1,4 +1,6 @@
 data/*.db
 data/_psp_tmp.pdf
+data/env_probe.json
 scraper/scraper.log
 __pycache__/
+.venv/
