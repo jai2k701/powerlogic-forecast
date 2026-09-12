@@ -85,13 +85,17 @@ def fetch_gap_from_iex(last_have: date, upto: date):
         import iex_scraper as sc
         rows = []
         for mkt, slug in sc.MARKETS.items():
-            url = sc.URL_TMPL.format(slug=slug,
-                                     frm=(last_have + timedelta(days=1)).strftime("%d-%m-%Y"),
-                                     to=upto.strftime("%d-%m-%Y"))
-            html = sc.fetch(url)
-            for r in sc.parse_records(html):
-                rows.append({"market": mkt, "date": date.fromisoformat(r["price_date"]),
-                             "block": r["time_block"], "mcp_rs_mwh": r["mcp"]})
+            # the site renders ~31 days per request, so walk the gap in chunks
+            cur = last_have + timedelta(days=1)
+            while cur <= upto:
+                chunk_end = min(cur + timedelta(days=29), upto)
+                url = sc.URL_TMPL.format(slug=slug, frm=cur.strftime("%d-%m-%Y"),
+                                         to=chunk_end.strftime("%d-%m-%Y"))
+                html = sc.fetch(url)
+                for r in sc.parse_records(html):
+                    rows.append({"market": mkt, "date": date.fromisoformat(r["price_date"]),
+                                 "block": r["time_block"], "mcp_rs_mwh": r["mcp"]})
+                cur = chunk_end + timedelta(days=1)
         return pd.DataFrame(rows)
     except Exception:                                    # noqa: BLE001
         return pd.DataFrame()
@@ -101,7 +105,9 @@ def top_up(daily, blocks):
     """Merge freshly scraped days into the loaded data (no-op when current)."""
     last_have = daily["date"].max()
     target = date.today() + timedelta(days=1)            # DAM publishes D+1
-    if last_have >= target or (target - last_have).days > 40:
+    # 120-day ceiling: wide enough to self-heal a long local outage, bounded so a
+    # first-run-with-no-data case can't trigger an unbounded scrape
+    if last_have >= target or (target - last_have).days > 120:
         return daily, blocks, False
     new = fetch_gap_from_iex(last_have, target)
     if new.empty:
